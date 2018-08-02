@@ -17,9 +17,9 @@
 
         <aware_of_modules>
             <aware_of_module version="3.9.5">org.openmrs.module.xforms</aware_of_module>
-            <aware_of_module version="2.6">org.openmrs.module.idgen</aware_of_module>
         </aware_of_modules>
         <require_modules>
+            <require_module version="${idgenVersion}">org.openmrs.module.idgen</require_module>
             <require_module version="2.1">org.openmrs.module.webservices.rest</require_module>
         </require_modules>
 

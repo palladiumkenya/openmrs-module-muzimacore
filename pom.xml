@@ -39,6 +39,7 @@
     <properties>
         <openMRSVersion>1.9.9</openMRSVersion>
         <webservicesRestVersion>2.1</webservicesRestVersion>
+        <idgenVersion>2.6</idgenVersion>
         <jsonPathVersion>0.8.1</jsonPathVersion>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <github.global.server>github</github.global.server>
@@ -73,6 +74,13 @@
                 <groupId>org.openmrs.module</groupId>
                 <artifactId>webservices.rest-omod-1.8</artifactId>
                 <version>${webservicesRestVersion}</version>
+                <scope>provided</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>org.openmrs.module</groupId>
+                <artifactId>idgen-api</artifactId>
+                <version>${idgenVersion}</version>
                 <scope>provided</scope>
             </dependency>
 

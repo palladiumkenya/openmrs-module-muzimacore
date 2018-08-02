@@ -17,7 +17,6 @@ import net.minidev.json.JSONArray;
 import net.minidev.json.JSONObject;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.math.NumberUtils;
-import org.apache.commons.lang.time.DateUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.openmrs.Concept;
@@ -33,6 +32,8 @@ import org.openmrs.PatientIdentifierType;
 import org.openmrs.PersonName;
 import org.openmrs.Provider;
 import org.openmrs.User;
+import org.openmrs.Visit;
+import org.openmrs.VisitAttribute;
 import org.openmrs.annotation.Handler;
 import org.openmrs.api.LocationService;
 import org.openmrs.api.PatientService;
@@ -46,11 +47,14 @@ import org.openmrs.module.muzima.model.RegistrationData;
 import org.openmrs.module.muzima.model.handler.QueueDataHandler;
 import org.openmrs.module.muzima.utils.JsonUtils;
 import org.openmrs.module.muzima.utils.PatientSearchUtils;
+import org.openmrs.util.OpenmrsUtil;
 import org.springframework.stereotype.Component;
 
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -78,7 +82,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     private Encounter encounter;
 
     /**
-     * 
+     *
      * @param queueData
      * @return
      */
@@ -121,6 +125,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
 
         try {
             if (validate(queueData)) {
+                assignToVisit(encounter);
                 Context.getEncounterService().saveEncounter(encounter);
             }
         } catch (Exception e) {
@@ -134,7 +139,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param encounter
      * @param patientObject
      */
@@ -211,7 +216,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param encounter - Encounter
      * @param parentObs - Obs
      * @param obsObject - Object
@@ -256,7 +261,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param encounter - Encounter
      * @param parentObs - Obs
      * @param concept - Concept
@@ -308,7 +313,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param encounter - Encounter
      * @param parentObs Obs
      * @param childObsObject - java.lang.Object
@@ -334,7 +339,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param encounter - Encounter
      * @param encounterObject - java.lang.Object
      * @throws QueueProcessorException
@@ -415,7 +420,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param dateValue - String representation of the date value.
      * @return java.util.Date Object
      */
@@ -433,4 +438,102 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     public boolean accept(final QueueData queueData) {
         return StringUtils.equals(DISCRIMINATOR_VALUE, queueData.getDiscriminator());
     }
+
+    protected static void useNewVisit(Encounter encounter) {
+        String VISIT_SOURCE_FORM = "8bfab185-6947-4958-b7ab-dfafae1a3e3d";
+        Visit visit = new Visit();
+        visit.setStartDatetime(OpenmrsUtil.firstSecondOfDay(encounter.getEncounterDatetime()));
+        visit.setStopDatetime(OpenmrsUtil.getLastMomentOfDay(encounter.getEncounterDatetime()));
+        visit.setLocation(encounter.getLocation());
+        visit.setPatient(encounter.getPatient());
+        visit.setVisitType(Context.getVisitService().getVisitTypeByUuid("3371a4d4-f66f-4454-a86d-92c7b3da990c"));
+
+        VisitAttribute sourceAttr = new VisitAttribute();
+        sourceAttr.setAttributeType(Context.getVisitService().getVisitAttributeTypeByUuid(VISIT_SOURCE_FORM));
+        sourceAttr.setOwner(visit);
+        sourceAttr.setValue(encounter.getForm());
+        visit.addAttribute(sourceAttr);
+
+        Context.getVisitService().saveVisit(visit);
+
+        setVisitOfEncounter(visit, encounter);
+    }
+
+    protected static void setVisitOfEncounter(Visit visit, Encounter encounter) {
+        // Remove from old visit
+        if (encounter.getVisit() != null) {
+            encounter.getVisit().getEncounters().remove(encounter);
+        }
+
+        // Set to new visit
+        encounter.setVisit(visit);
+
+        if (visit != null) {
+            visit.addEncounter(encounter);
+        }
+    }
+
+    /**
+     * Checks whether a date has any time value
+     * @param date the date
+     * @return true if the date has time
+     * @should return true only if date has time
+     */
+    protected  boolean dateHasTime(Date date) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(date);
+        return cal.get(Calendar.HOUR) != 0 || cal.get(Calendar.MINUTE) != 0 || cal.get(Calendar.SECOND) != 0 || cal.get(Calendar.MILLISECOND) != 0;
+    }
+
+    /**
+     * Uses an existing visit for the given encounter
+     * @param encounter the encounter
+     * @return true if a suitable visit was found
+     */
+    protected boolean useExistingVisit(Encounter encounter) {
+        // If encounter has time, then we need an exact fit for an existing visit
+        List<Visit> visits = Context.getVisitService().getVisits(null, Collections.singletonList(encounter.getPatient()), null, null, null,
+                encounter.getEncounterDatetime(), null, null, null, true, false);
+
+        for (Visit visit : visits) {
+            // Skip visits which ended before the encounter date
+            if (visit.getStopDatetime() != null && visit.getStopDatetime().before(encounter.getEncounterDatetime())) {
+                continue;
+            }
+
+            if (checkLocations(visit, encounter)) {
+                setVisitOfEncounter(visit, encounter);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Convenience method to check whether the location of a visit and an encounter are compatible
+     * @param visit the visit
+     * @param encounter the encounter
+     * @return true if locations won't conflict
+     */
+    protected boolean checkLocations(Visit visit, Encounter encounter) {
+        return visit.getLocation() == null || Location.isInHierarchy(encounter.getLocation(), visit.getLocation());
+    }
+
+    /**
+     * Does the actual assignment of the encounter to a visit
+     * @param encounter the encounter
+     */
+    protected void assignToVisit(Encounter encounter) {
+        // Do nothing if the encounter already belongs to a visit and can't be moved
+        if (encounter.getVisit() != null) {
+            return;
+        }
+
+        // Try using an existing visit
+        if (!useExistingVisit(encounter)) {
+            useNewVisit(encounter);
+
+        }
+    }
+
 }
