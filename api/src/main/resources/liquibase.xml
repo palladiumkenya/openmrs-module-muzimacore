@@ -1321,19 +1321,19 @@
         </insert>
     </changeSet>
 
-    <!--Adding scheduled task to periodically refresh ETL tables-->
-    <changeSet id="${project.parent.artifactId}-20180802-1220" author="aojwang">
+    <!--Adding scheduled task to periodically process muzima queue data-->
+    <changeSet id="muzima-20180802-1220" author="aojwang">
         <preConditions onFail="MARK_RAN">
             <sqlCheck expectedResult="0">
                 SELECT COUNT(*) FROM scheduler_task_config
-                WHERE schedulable_class = 'org.openmrs.module.kenyaemrCharts.task.RefreshETLTablesTask'
-                And name = 'Refresh ETL Tables'
+                WHERE schedulable_class = 'org.openmrs.module.muzima.task.ProcessQueueDataTask'
+                And name = 'Muzima Queue Data Processor'
             </sqlCheck>
         </preConditions>
         <comment>Inserting Muzima Queue Data Processor into 'schedule_task_config' table</comment>
         <insert tableName="scheduler_task_config">
             <column name="name" value="Muzima Queue Data Processor" />
-            <column name="description" value="Processes Muzima Queue Data Processor" />
+            <column name="description" value="Processes Muzima Queue Data " />
             <column name="schedulable_class" value="org.openmrs.module.muzima.task.ProcessQueueDataTask" />
             <column name="start_time_pattern" value="MM/dd/yyyy HH:mm:ss" />
             <column name="start_time" valueDate="2017-11-28T23:59:59" />
@@ -1341,8 +1341,8 @@
             <column name="date_created" valueDate="CURRENT_TIMESTAMP" />
             <column name="created_by" value="1" />
             <column name="start_on_startup" value="1" />
-            <column name="started" value="1" />
-            <column name="uuid" value="ca3c92a7-a312-4a5f-b7f5-fabf4b6122d4" />
+            <column name="started" value="0" />
+            <column name="uuid" value="b82736c2-9651-11e8-9eb6-529269fb1459" />
         </insert>
     </changeSet>
 
