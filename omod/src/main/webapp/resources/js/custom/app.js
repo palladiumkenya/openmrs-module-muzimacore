@@ -20,7 +20,16 @@ muzimaCoreModule.
             when('/update/forms/:muzimaform_uuid',{controller: UpdateCtrl, templateUrl: '../../moduleResources/muzimacore/partials/update/forms.html'}).
             when('/error/:uuid', {controller: ErrorCtrl, templateUrl: '../../moduleResources/muzimacore/partials/error.html'}).
             when('/errors', {controller: ErrorsCtrl, templateUrl: '../../moduleResources/muzimacore/partials/errors.html'}).
+            when('/duplicates', {controller: PotentialDuplicatesErrorsCtrl, templateUrl: '../../moduleResources/muzimacore/partials/potential_duplicates.html'}).
+            when('/merge/:uuid', {controller: MergeCtrl, templateUrl: '../../moduleResources/muzimacore/partials/merge.html'}).
             when('/edit/:uuid', {controller: EditCtrl, templateUrl: '../../moduleResources/muzimacore/partials/edit.html'}).
+            when('/setting/:uuid', {controller: SettingCtrl, templateUrl: '../../moduleResources/muzimacore/partials/setting.html'}).
+            when('/settings', {controller: SettingsCtrl, templateUrl: '../../moduleResources/muzimacore/partials/settings.html'}).
+            when('/createSetting/', {controller: SettingCtrl, templateUrl: '../../moduleResources/muzimacore/partials/setting.html'}).
+		    when('/cohortDefinitions', {controller: CohortDefinitionsCtrl, templateUrl: '../../moduleResources/muzimacore/partials/cohortdefinitions.html'}).
+            when('/cohortDefinition', {controller: CohortDefinitionCtrl, templateUrl: '../../moduleResources/muzimacore/partials/cohortdefinition.html'}).
+            when('/cohortDefinition/:uuid', {controller: CohortDefinitionCtrl, templateUrl: '../../moduleResources/muzimacore/partials/cohortdefinition.html'}).
+            when('/createCohortDefinition', {controller: CohortDefinitionCtrl, templateUrl: '../../moduleResources/muzimacore/partials/cohortdefinition.html'}).
             otherwise({redirectTo: '/sources'});
     }]
 );
@@ -77,12 +86,23 @@ muzimaCoreModule.factory('$data', function ($http) {
         return $http.post("edit.json",{"formData": formData});
     };
     var validateData = function (uuid, formData) {
-        return $http.post("validate.json?uuid="+uuid+"&formData="+formData);
+        return $http.post("validate.json?uuid="+uuid,formData);
     };
     var saveEditedFormData = function (uuid, formData) {
-        return $http.post("error.json?uuid="+uuid+"&formData="+formData);
+        return $http.post("error.json?uuid="+uuid,formData);
     };
 
+    var mergePatient = function(info) {
+        return $http.post('mergePatient.json', info);
+    };
+
+    var requeueDuplicatePatient = function(info) {
+        return $http.post('requeueDuplicatePatient.json', info);
+    };
+
+    var getPatientByIdentifier = function (identifier) {
+        return $http.get('../../ws/rest/v1/patient?identifier=' + identifier + "&v=full");
+    };
     return {
         getQueues: getQueues,
         getQueue: getQueue,
@@ -100,8 +120,12 @@ muzimaCoreModule.factory('$data', function ($http) {
 
         getEdit: getEdit,
         editErrors: editErrors,
-        validateData: validateData
-    }
+        validateData: validateData,
+
+        getPatientByIdentifier: getPatientByIdentifier,
+        mergePatient: mergePatient,
+        requeueDuplicatePatient: requeueDuplicatePatient
+    };
 });
 
 muzimaCoreModule.factory('FormService', function ($http) {
@@ -125,7 +149,7 @@ muzimaCoreModule.factory('FormService', function ($http) {
         return $http.get('../../module/muzimacore/discriminator.json', {cache: false});
     };
     var searchForms = function(search) {
-        return $http.get('../../ws/rest/v1/form?v=custom:(name,uuid,version,description)&q=' + (search === undefined ? '' : search));
+        return $http.get('../../ws/rest/v1/form?v=custom:(name,uuid,version,description,retired)&q=' + (search === undefined ? '' : search));
     };
 
     return {
@@ -248,5 +272,63 @@ muzimaCoreModule.factory('$configs', function($http) {
         searchConfigLocations: searchConfigLocations,
         searchConfigProviders: searchConfigProviders,
         searchConfigConcepts: searchConfigConcepts
+    }
+});
+
+muzimaCoreModule.factory('$muzimaSettings', function($http) {
+
+    var getSettings = function (search, pageNumber, pageSize) {
+        if (search === undefined) {
+            // replace undefined search term with empty string
+            search = '';
+        }
+        return $http.get("settings.json?search=" + search + "&pageNumber=" + pageNumber + "&pageSize=" + pageSize);
+    };
+    var getSetting = function (uuid) {
+        return $http.get("setting.json?uuid=" + uuid);
+    };
+    var saveSetting = function (uuid, property, name, description, value) {
+        return $http.post("setting.json", {"uuid": uuid, "property": property, "name": name, "description": description,"value": value});
+    };
+    var deleteSetting = function (uuid) {
+        return $http.post("source.json", {"uuid": uuid});
+    };
+
+    return {
+        getSettings: getSettings,
+        getSetting: getSetting,
+        saveSetting: saveSetting,
+        deleteSetting: deleteSetting
+    }
+});
+
+muzimaCoreModule.factory('$cohortDefinitionService', function ($http) {
+    
+
+    var getCohortDefinitions = function (pageNumber, pageSize) {
+        return $http.get("cohortDefinitions.json?pageNumber=" + pageNumber + "&pageSize=" + pageSize);
+    };
+    var getCohortDefinition = function (uuid) {
+            return $http.get("cohortDefinition.json?uuid=" + uuid);
+        };
+    var getAllCohorts = function () {
+            return $http.get("cohorts.json");
+        };
+    var getAllCohortsWithoutDefinition=function(){
+            return $http.get("cohortswithoutdefinition.json");
+         };
+    var saveCohortDefinition = function (uuid, cohortid, definition, isScheduledForExecution, isMemberAdditionEnabled, isMemberRemovalEnabled) {
+            return $http.post("cohortDefinition.json", {"uuid": uuid, "cohortid":cohortid, "definition": definition,
+                "isScheduledForExecution": isScheduledForExecution, "isMemberAdditionEnabled":isMemberAdditionEnabled, "isMemberRemovalEnabled": isMemberRemovalEnabled});
+        };
+
+    return {
+
+        getCohortDefinitions: getCohortDefinitions,
+        getCohortDefinition:getCohortDefinition,
+        saveCohortDefinition:saveCohortDefinition,
+        getAllCohorts:getAllCohorts,
+        getAllCohortsWithoutDefinition:getAllCohortsWithoutDefinition
+        
     }
 });

@@ -26,6 +26,7 @@ import org.openmrs.PersonAddress;
 import org.openmrs.PersonAttribute;
 import org.openmrs.PersonAttributeType;
 import org.openmrs.PersonName;
+import org.openmrs.User;
 import org.openmrs.annotation.Handler;
 import org.openmrs.api.PersonService;
 import org.openmrs.api.context.Context;
@@ -36,6 +37,7 @@ import org.openmrs.module.muzima.model.QueueData;
 import org.openmrs.module.muzima.model.RegistrationData;
 import org.openmrs.module.muzima.model.handler.QueueDataHandler;
 import org.openmrs.module.muzima.utils.JsonUtils;
+import org.openmrs.module.muzima.utils.PatientSearchUtils;
 
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -88,7 +90,7 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
             /*Custom exception thrown by the validate function should not be added again into @queueProcessorException.
              It should add the runtime dao Exception while saving the data into @queueProcessorException collection */
             if (!e.getClass().equals(QueueProcessorException.class)) {
-                queueProcessorException.addException(e);
+                queueProcessorException.addException(new Exception("Exception while process payload ",e));
             }
         } finally {
             if (queueProcessorException.anyExceptions()) {
@@ -108,7 +110,7 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
             validateUnsavedPatient();
             return true;
         } catch (Exception e) {
-            queueProcessorException.addException(e);
+            queueProcessorException.addException(new Exception("Exception while validating payload ",e));
             return false;
         } finally {
             if (queueProcessorException.anyExceptions()) {
@@ -123,14 +125,16 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
     }
 
     private void validateUnsavedPatient() {
-        Patient savedPatient = findSimilarSavedPatient();
-        if (savedPatient != null) {
-            queueProcessorException.addException(
-                    new Exception(
-                            "Found a patient with similar characteristic :  patientId = " + savedPatient.getPatientId()
-                                    + " Identifier Id = " + savedPatient.getPatientIdentifier().getIdentifier()
-                    )
-            );
+        if(!JsonUtils.readAsBoolean(payload, "$['skipPatientMatching']")) {
+            Patient savedPatient = findSimilarSavedPatient();
+            if (savedPatient != null) {
+                queueProcessorException.addException(
+                        new Exception(
+                                "Found a patient with similar characteristic :  patientId = " + savedPatient.getPatientId()
+                                        + " Identifier Id = " + savedPatient.getPatientIdentifier().getIdentifier()
+                        )
+                );
+            }
         }
     }
 
@@ -142,10 +146,11 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
         setPatientNameFromPayload();
         setPatientAddressesFromPayload();
         setPersonAttributesFromPayload();
+        setUnsavedPatientCreatorFromPayload();
     }
 
     private void setPatientIdentifiersFromPayload() {
-        Set<PatientIdentifier> patientIdentifiers = new HashSet<PatientIdentifier>();
+        Set<PatientIdentifier> patientIdentifiers = new TreeSet<PatientIdentifier>();
         PatientIdentifier preferredIdentifier = getPreferredPatientIdentifierFromPayload();
         if (preferredIdentifier != null) {
             patientIdentifiers.add(preferredIdentifier);
@@ -159,10 +164,11 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
     }
 
     private PatientIdentifier getPreferredPatientIdentifierFromPayload(){
-        String identifierValue = JsonUtils.readAsString(payload, "$['patient']['patient.medical_record_number']");
-        String identifierTypeName = "National ID";
+//        String identifierValue = JsonUtils.readAsString(payload, "$['patient']['patient.medical_record_number']");
+//        String identifierTypeName = "AMRS Universal ID";
 
-        PatientIdentifier preferredPatientIdentifier = createPatientIdentifier(identifierTypeName, identifierValue);
+       // PatientIdentifier preferredPatientIdentifier = createPatientIdentifier(identifierTypeName, identifierValue);
+        PatientIdentifier preferredPatientIdentifier = generateOpenMRSID() ;//createPatientIdentifier(identifierTypeName, identifierValue);
         if (preferredPatientIdentifier != null) {
             preferredPatientIdentifier.setPreferred(true);
             return preferredPatientIdentifier;
@@ -173,11 +179,8 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
 
     private List<PatientIdentifier> getOtherPatientIdentifiersFromPayload() {
         List<PatientIdentifier> otherIdentifiers = new ArrayList<PatientIdentifier>();
-
-        // add OpenMRS ID to the list. The system requires this in order to create new patient
-        otherIdentifiers.add(generateOpenMRSID());
         Object identifierTypeNameObject = JsonUtils.readAsObject(payload, "$['observation']['other_identifier_type']");
-        Object identifierValueObject =JsonUtils.readAsObject(payload, "$['observation']['other_identifier_value']");
+        Object identifierValueObject = JsonUtils.readAsObject(payload, "$['observation']['other_identifier_value']");
 
         if (identifierTypeNameObject instanceof JSONArray) {
             JSONArray identifierTypeName = (JSONArray) identifierTypeNameObject;
@@ -294,13 +297,7 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
         PersonAddress patientAddress = new PersonAddress();
 
         String county = JsonUtils.readAsString(payload, "$['patient']['patient.county']");
-        patientAddress.setCountyDistrict(county);
-
-        String subCounty = JsonUtils.readAsString(payload, "$['patient']['patient.sub_county']");
-        patientAddress.setStateProvince(subCounty);
-
-        String ward = JsonUtils.readAsString(payload, "$['patient']['patient.ward']");
-        patientAddress.setCountyDistrict(ward);
+        patientAddress.setStateProvince(county);
 
         String location = JsonUtils.readAsString(payload, "$['patient']['patient.location']");
         patientAddress.setAddress6(location);
@@ -311,16 +308,9 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
         String village = JsonUtils.readAsString(payload, "$['patient']['patient.village']");
         patientAddress.setCityVillage(village);
 
-        String postal_address = JsonUtils.readAsString(payload, "$['patient']['patient.postal_address']");
-        patientAddress.setAddress1(postal_address);
-
-        String landmark = JsonUtils.readAsString(payload, "$['patient']['patient.landmark']");
-        patientAddress.setAddress2(landmark);
-
         Set<PersonAddress> addresses = new TreeSet<PersonAddress>();
         addresses.add(patientAddress);
         unsavedPatient.setAddresses(addresses);
-
     }
 
     private void setPersonAttributesFromPayload(){
@@ -331,7 +321,10 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
         setAsAttribute("Mother's Name",mothersName);
 
         String phoneNumber = JsonUtils.readAsString(payload, "$['patient']['patient.phone_number']");
-        setAsAttributeByUUID(TELEPHONE_CONTACT,phoneNumber);
+        setAsAttribute("Telephone contact",phoneNumber);
+
+//        String phoneNumber = JsonUtils.readAsString(payload, "$['patient']['patient.phone_number']");
+//        setAsAttributeByUUID(TELEPHONE_CONTACT,phoneNumber);
 
         String nearestHealthCenter = JsonUtils.readAsString(payload, "$['patient']['patient.nearest_health_center']");
         setAsAttributeByUUID(NEAREST_HEALTH_CENTER,nearestHealthCenter);
@@ -360,20 +353,8 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
         String nextOfKinAddress = JsonUtils.readAsString(payload, "$['patient']['patient.next_of_kin_address']");
         setAsAttributeByUUID(NEXT_OF_KIN_ADDRESS,nextOfKinAddress);
 
-        unsavedPatient.setAttributes(personAttributes);
-    }
 
-    private void setAsAttribute(String attributeTypeName, String value){
-        PersonService personService = Context.getPersonService();
-        PersonAttributeType attributeType = personService.getPersonAttributeTypeByName(attributeTypeName);
-        if(attributeType !=null && value != null){
-            PersonAttribute personAttribute = new PersonAttribute(attributeType, value);
-            personAttributes.add(personAttribute);
-        } else if(attributeType ==null){
-            queueProcessorException.addException(
-                    new Exception("Unable to find Person Attribute type by name '" + attributeTypeName + "'")
-            );
-        }
+        unsavedPatient.setAttributes(personAttributes);
     }
 
     private void setAsAttributeByUUID(String uuid, String value){
@@ -389,57 +370,56 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
         }
     }
 
+    private void setAsAttribute(String attributeTypeName, String value){
+        PersonService personService = Context.getPersonService();
+        PersonAttributeType attributeType = personService.getPersonAttributeTypeByName(attributeTypeName);
+        if(attributeType !=null && value != null){
+            PersonAttribute personAttribute = new PersonAttribute(attributeType, value);
+            personAttributes.add(personAttribute);
+        } else if(attributeType ==null){
+            queueProcessorException.addException(
+                    new Exception("Unable to find Person Attribute type by name '" + attributeTypeName + "'")
+            );
+        }
+    }
+
+
+    private  void setUnsavedPatientCreatorFromPayload(){
+        String userString = JsonUtils.readAsString(payload, "$['encounter']['encounter.user_system_id']");
+        String providerString = JsonUtils.readAsString(payload, "$['encounter']['encounter.provider_id']");
+
+        User user = Context.getUserService().getUserByUsername(userString);
+        if (user == null) {
+            providerString = JsonUtils.readAsString(payload, "$['encounter']['encounter.provider_id']");
+            user = Context.getUserService().getUserByUsername(providerString);
+        }
+        if (user == null) {
+            queueProcessorException.addException(new Exception("Unable to find user using the User Id: " + userString + " or Provider Id: "+providerString));
+        } else {
+            unsavedPatient.setCreator(user);
+        }
+    }
+
     private Patient findSimilarSavedPatient() {
         Patient savedPatient = null;
         if (unsavedPatient.getNames().isEmpty()) {
             PatientIdentifier identifier = unsavedPatient.getPatientIdentifier();
             if (identifier != null) {
                 List<Patient> patients = Context.getPatientService().getPatients(identifier.getIdentifier());
-                savedPatient = findPatient(patients, unsavedPatient);
+                savedPatient = PatientSearchUtils.findPatient(patients, unsavedPatient);
             }
         } else {
             PersonName personName = unsavedPatient.getPersonName();
             List<Patient> patients = Context.getPatientService().getPatients(personName.getFullName());
-            savedPatient = findPatient(patients, unsavedPatient);
+            savedPatient = PatientSearchUtils.findPatient(patients, unsavedPatient);
         }
         return savedPatient;
-    }
-
-    private Patient findPatient(final List<Patient> patients, final Patient unsavedPatient) {
-        for (Patient patient : patients) {
-            // match it using the person name and gender, what about the dob?
-            PersonName savedPersonName = patient.getPersonName();
-            PersonName unsavedPersonName = unsavedPatient.getPersonName();
-            if (StringUtils.isNotBlank(savedPersonName.getFullName())
-                    && StringUtils.isNotBlank(unsavedPersonName.getFullName())) {
-                if (StringUtils.equalsIgnoreCase(patient.getGender(), unsavedPatient.getGender())) {
-                    if (patient.getBirthdate() != null && unsavedPatient.getBirthdate() != null
-                            && DateUtils.isSameDay(patient.getBirthdate(), unsavedPatient.getBirthdate())) {
-                        String savedGivenName = savedPersonName.getGivenName();
-                        String unsavedGivenName = unsavedPersonName.getGivenName();
-                        int givenNameEditDistance = StringUtils.getLevenshteinDistance(
-                                StringUtils.lowerCase(savedGivenName),
-                                StringUtils.lowerCase(unsavedGivenName));
-                        String savedFamilyName = savedPersonName.getFamilyName();
-                        String unsavedFamilyName = unsavedPersonName.getFamilyName();
-                        int familyNameEditDistance = StringUtils.getLevenshteinDistance(
-                                StringUtils.lowerCase(savedFamilyName),
-                                StringUtils.lowerCase(unsavedFamilyName));
-                        if (givenNameEditDistance < 3 && familyNameEditDistance < 3) {
-                            return patient;
-                        }
-                    }
-                }
-            }
-        }
-        return null;
     }
 
     @Override
     public boolean accept(final QueueData queueData) {
         return StringUtils.equals(DISCRIMINATOR_VALUE, queueData.getDiscriminator());
     }
-
     /**
      * Can't save patients unless they have required OpenMRS IDs
      */
@@ -459,5 +439,4 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
         PatientIdentifier identifier = new PatientIdentifier(generated, openmrsIDType, location);
         return identifier;
     }
-
 }

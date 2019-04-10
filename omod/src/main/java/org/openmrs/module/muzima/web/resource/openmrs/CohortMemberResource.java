@@ -14,6 +14,7 @@
 package org.openmrs.module.muzima.web.resource.openmrs;
 
 import org.apache.commons.beanutils.ConversionException;
+import org.apache.commons.lang.StringUtils;
 import org.openmrs.Cohort;
 import org.openmrs.Patient;
 import org.openmrs.api.context.Context;
@@ -48,21 +49,32 @@ import java.util.List;
  */
 @Resource(name = MuzimaConstants.MUZIMA_NAMESPACE + "/member",
         supportedClass = FakeCohortMember.class,
-        supportedOpenmrsVersions = {"1.8.*", "1.9.*","1.10.*","1.11.*"})
+        supportedOpenmrsVersions = {"1.8.*", "1.9.*","1.10.*","1.11.*","1.12.*","2.0.*","2.1.*"})
 public class CohortMemberResource extends DelegatingCrudResource<FakeCohortMember> {
 
     @Override
     public PageableResult doSearch(final RequestContext context) throws ResponseException {
         HttpServletRequest request = context.getRequest();
         String uuidParameter = request.getParameter("uuid");
+        String membersRemovedOption = request.getParameter("members_removed");
         String syncDateParameter = request.getParameter("syncDate");
         List<FakeCohortMember> members = new ArrayList<FakeCohortMember>();
         if (uuidParameter != null) {
             Date syncDate = ResourceUtils.parseDate(syncDateParameter);
             CoreService coreService = Context.getService(CoreService.class);
             final int patientCount = coreService.countPatients(uuidParameter, syncDate).intValue();
-            final List<Patient> patients = coreService.getPatients(uuidParameter, syncDate,
-                    context.getStartIndex(), context.getLimit());
+            final List<Patient> patients = new ArrayList<Patient>();
+
+            if(StringUtils.isNotEmpty(membersRemovedOption)){
+                List<Patient> removedMembers = coreService.getPatientsRemovedFromCohort(uuidParameter, syncDate,
+                        context.getStartIndex(), context.getLimit());
+                patients.addAll(removedMembers);
+            } else {
+                List<Patient> addedMembers = coreService.getPatients(uuidParameter, syncDate,
+                        context.getStartIndex(), context.getLimit());
+                patients.addAll(addedMembers);
+            }
+
             final Cohort cohort = Context.getCohortService().getCohortByUuid(uuidParameter);
             for (Patient cohortMember : patients) {
                 members.add(new FakeCohortMember(cohortMember, cohort));

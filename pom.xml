@@ -5,7 +5,7 @@
 
     <groupId>org.openmrs.module</groupId>
     <artifactId>muzimacore</artifactId>
-    <version>1.0.0</version>
+    <version>1.4.1</version>
     <packaging>pom</packaging>
     <name>Muzima Core Module</name>
     <description>Muzima module providing core services to the Muzima mobile application.</description>
@@ -32,12 +32,14 @@
 
     <modules>
         <module>api</module>
+        <module>api-1.9</module>
+        <module>api-2.1</module>
         <module>omod</module>
         <module>javarosa</module>
     </modules>
 
     <properties>
-        <openMRSVersion>1.9.7</openMRSVersion>
+        <openMRSVersion>1.9.9</openMRSVersion>
         <webservicesRestVersion>2.1</webservicesRestVersion>
         <idgenVersion>2.6</idgenVersion>
         <jsonPathVersion>0.8.1</jsonPathVersion>
@@ -167,13 +169,13 @@
             <dependency>
                 <groupId>org.apache.httpcomponents</groupId>
                 <artifactId>httpclient</artifactId>
-                <version>4.2.5</version>
+                <version>4.3.6</version>
                 <scope>compile</scope>
             </dependency>
             <dependency>
                 <groupId>org.apache.httpcomponents</groupId>
                 <artifactId>httpmime</artifactId>
-                <version>4.2.5</version>
+                <version>4.3.6</version>
                 <scope>compile</scope>
             </dependency>
             <dependency>
@@ -242,6 +244,14 @@
             </plugins>
         </pluginManagement>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>2.17</version>
+                <configuration>
+                    <argLine>-Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
+                </configuration>
+            </plugin>
             <plugin>
                 <artifactId>maven-deploy-plugin</artifactId>
                 <version>2.7</version>

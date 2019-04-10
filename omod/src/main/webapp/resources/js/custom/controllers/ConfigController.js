@@ -20,6 +20,7 @@ function ConfigCtrl($scope, $routeParams, $location, $configs, FormService) {
     $scope.uuid = $routeParams.uuid;
     if ($scope.uuid === undefined) {
         $scope.mode = "edit";
+        $('#wait').hide();
     } else {
         $configs.getConfiguration($scope.uuid).then(function (response) {
             $scope.config = response.data;
@@ -39,6 +40,7 @@ function ConfigCtrl($scope, $routeParams, $location, $configs, FormService) {
         }).then(function () {
             $scope.bindData();
             $scope.setEvent();
+            $('#wait').hide();
         });
     }
 
@@ -118,7 +120,7 @@ function ConfigCtrl($scope, $routeParams, $location, $configs, FormService) {
 
                 var formResult = response.data;
                 var metaJson = JSON.parse(formResult.metaJson);
-                if (metaJson.concepts != undefined) {
+                if (metaJson != null && metaJson.concepts != undefined) {
                     angular.forEach(metaJson.concepts, function (mConcept) {
                         var conceptExists = _.find($scope.extractedConcepts, function (eConcept) {
                             return mConcept.uuid == eConcept.uuid
@@ -388,13 +390,17 @@ function ConfigCtrl($scope, $routeParams, $location, $configs, FormService) {
 
 function ConfigsCtrl($scope, $configs) {
     // initialize the paging structure
+    $scope.maxSize = 10;
     $scope.pageSize = 10;
     $scope.currentPage = 1;
+    $scope.totalItems = 0;
     $configs.getConfigurations($scope.search, $scope.currentPage, $scope.pageSize).
     then(function (response) {
         var serverData = response.data;
         $scope.configs = serverData.objects;
         $scope.noOfPages = serverData.pages;
+        $scope.totalItems = serverData.totalItems;
+        $('#wait').hide();
     });
 
     $scope.$watch('currentPage', function (newValue, oldValue) {
@@ -404,6 +410,7 @@ function ConfigsCtrl($scope, $configs) {
                 var serverData = response.data;
                 $scope.configs = serverData.objects;
                 $scope.noOfPages = serverData.pages;
+                $scope.totalItems = serverData.totalItems;
             });
         }
     }, true);
@@ -416,6 +423,7 @@ function ConfigsCtrl($scope, $configs) {
                 var serverData = response.data;
                 $scope.configs = serverData.objects;
                 $scope.noOfPages = serverData.pages;
+                $scope.totalItems = serverData.totalItems;
             });
         }
     }, true);

@@ -45,7 +45,7 @@ import java.util.List;
  */
 @Resource(name = MuzimaConstants.MUZIMA_NAMESPACE + "/encounter",
         supportedClass = FakeEncounter.class,
-        supportedOpenmrsVersions = {"1.8.*", "1.9.*","1.10.*","1.11.*"})
+        supportedOpenmrsVersions = {"1.8.*", "1.9.*","1.10.*","1.11.*","1.12.*","2.0.*","2.1.*"})
 public class EncounterResource extends DataDelegatingCrudResource<FakeEncounter> {
 
     /**
@@ -161,6 +161,7 @@ public class EncounterResource extends DataDelegatingCrudResource<FakeEncounter>
         if (rep instanceof DefaultRepresentation) {
             DelegatingResourceDescription description = new DelegatingResourceDescription();
             description.addProperty("uuid");
+            description.addProperty("id");
             description.addProperty("encounterDatetime");
             description.addProperty("patient", Representation.REF);
             description.addProperty("location", Representation.REF);
@@ -174,6 +175,7 @@ public class EncounterResource extends DataDelegatingCrudResource<FakeEncounter>
         } else if (rep instanceof FullRepresentation) {
             DelegatingResourceDescription description = new DelegatingResourceDescription();
             description.addProperty("uuid");
+            description.addProperty("id");
             description.addProperty("encounterDatetime");
             description.addProperty("patient", Representation.REF);
             description.addProperty("location");
