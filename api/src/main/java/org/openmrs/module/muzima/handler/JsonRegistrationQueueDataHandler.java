@@ -14,6 +14,8 @@
 package org.openmrs.module.muzima.handler;
 
 import net.minidev.json.JSONArray;
+import net.minidev.json.JSONObject;
+
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -37,6 +39,8 @@ import org.openmrs.module.muzima.model.RegistrationData;
 import org.openmrs.module.muzima.model.handler.QueueDataHandler;
 import org.openmrs.module.muzima.utils.JsonUtils;
 import org.openmrs.module.muzima.utils.PatientSearchUtils;
+
+import com.jayway.jsonpath.InvalidPathException;
 
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -177,30 +181,50 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
 
     private List<PatientIdentifier> getOtherPatientIdentifiersFromPayload() {
         List<PatientIdentifier> otherIdentifiers = new ArrayList<PatientIdentifier>();
-        Object identifierTypeNameObject = JsonUtils.readAsObject(payload, "$['observation']['other_identifier_type']");
-        Object identifierValueObject = JsonUtils.readAsObject(payload, "$['observation']['other_identifier_value']");
-
-        if (identifierTypeNameObject instanceof JSONArray) {
-            JSONArray identifierTypeName = (JSONArray) identifierTypeNameObject;
-            JSONArray identifierValue = (JSONArray) identifierValueObject;
-            for (int i = 0; i < identifierTypeName.size(); i++) {
-                PatientIdentifier identifier = createPatientIdentifier(identifierTypeName.get(i).toString(),
-                        identifierValue.get(i).toString());
+        try {
+            Object otheridentifierObject = JsonUtils.readAsObject(payload, "$['patient']['patient.otheridentifier']");
+            if (JsonUtils.isJSONArrayObject(otheridentifierObject)) {
+                for (Object otherIdentifier : (JSONArray) otheridentifierObject) {
+                    PatientIdentifier identifier = createPatientIdentifier((JSONObject) otherIdentifier);
+                    if (identifier != null) {
+                        otherIdentifiers.add(identifier);
+                    }
+                }
+            } else {
+                PatientIdentifier identifier = createPatientIdentifier((JSONObject) otheridentifierObject);
                 if (identifier != null) {
                     otherIdentifiers.add(identifier);
                 }
             }
-        } else if (identifierTypeNameObject instanceof String) {
-            String identifierTypeName = (String) identifierTypeNameObject;
-            String identifierValue = (String) identifierValueObject;
-            PatientIdentifier identifier = createPatientIdentifier(identifierTypeName, identifierValue);
-            if (identifier != null) {
-                otherIdentifiers.add(identifier);
+
+            JSONObject patientObject = (JSONObject) JsonUtils.readAsObject(payload, "$['patient']");
+            Set<String> keys = patientObject.keySet();
+            for(Object key:keys){
+                if(((String)key).startsWith("patient.otheridentifier^")){
+                    PatientIdentifier identifier = createPatientIdentifier((JSONObject) patientObject.get(key));
+                    if (identifier != null) {
+                        otherIdentifiers.add(identifier);
+                    }
+                }
             }
+        } catch (InvalidPathException e) {
+            log.error( "Error while parsing other identifiers ",e);
         }
         return otherIdentifiers;
     }
 
+    private PatientIdentifier createPatientIdentifier(JSONObject identifierObject) {
+        if(identifierObject == null){
+            return null;
+        }
+
+        String identifierTypeName = (String) getElementFromJsonObject(identifierObject,"identifier_type_name");
+        // String identifierUuid = (String) getElementFromJsonObject(identifierObject,"identifier_type_uuid");
+        String identifierValue = (String) getElementFromJsonObject(identifierObject,"identifier_value");
+
+        return createPatientIdentifier(identifierTypeName, identifierValue);
+    }
+    
     private PatientIdentifier createPatientIdentifier(String identifierTypeName, String identifierValue) {
         PatientIdentifierType identifierType = Context.getPatientService()
                 .getPatientIdentifierTypeByName(identifierTypeName);
@@ -435,5 +459,12 @@ public class JsonRegistrationQueueDataHandler implements QueueDataHandler {
         String generated = Context.getService(IdentifierSourceService.class).generateIdentifier(openmrsIDType, "Registration");
         PatientIdentifier identifier = new PatientIdentifier(generated, openmrsIDType, location);
         return identifier;
+    }
+
+    private Object getElementFromJsonObject(JSONObject jsonObject, String key){
+        if(jsonObject.containsKey(key)) {
+            return jsonObject.get(key);
+        }
+        return null;
     }
 }
