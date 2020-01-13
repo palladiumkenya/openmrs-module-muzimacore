@@ -33,25 +33,21 @@ import org.openmrs.PersonName;
 import org.openmrs.Provider;
 import org.openmrs.User;
 import org.openmrs.Visit;
-import org.openmrs.VisitType;
+import org.openmrs.VisitAttribute;
 import org.openmrs.annotation.Handler;
 import org.openmrs.api.LocationService;
 import org.openmrs.api.PatientService;
-import org.openmrs.api.VisitService;
 import org.openmrs.api.context.Context;
-import org.openmrs.module.muzima.api.service.MuzimaConfigService;
 import org.openmrs.module.muzima.api.service.MuzimaFormService;
-import org.openmrs.module.muzima.api.service.MuzimaSettingService;
 import org.openmrs.module.muzima.api.service.RegistrationDataService;
 import org.openmrs.module.muzima.exception.QueueProcessorException;
-import org.openmrs.module.muzima.model.MuzimaConfig;
 import org.openmrs.module.muzima.model.MuzimaForm;
-import org.openmrs.module.muzima.model.MuzimaSetting;
 import org.openmrs.module.muzima.model.QueueData;
 import org.openmrs.module.muzima.model.RegistrationData;
 import org.openmrs.module.muzima.model.handler.QueueDataHandler;
 import org.openmrs.module.muzima.utils.JsonUtils;
 import org.openmrs.module.muzima.utils.PatientSearchUtils;
+import org.openmrs.util.OpenmrsUtil;
 import org.springframework.stereotype.Component;
 
 import java.text.DateFormat;
@@ -59,19 +55,13 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-
-import static org.openmrs.module.muzima.utils.Constants.MuzimaSettings.DEFAULT_MUZIMA_VISIT_TYPE_SETTING_PROPERTY;
-import static org.openmrs.module.muzima.utils.Constants.MuzimaSettings.MUZIMA_VISIT_GENERATION_SETTING_PROPERTY;
 
 /**
- * TODO brief class description.
+ * TODO brief class desceription.
  */
 @Component
 @Handler(supports = QueueData.class, order = 5)
@@ -92,7 +82,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     private Encounter encounter;
 
     /**
-     * 
+     *
      * @param queueData
      * @return
      */
@@ -104,11 +94,11 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
             encounter = new Encounter();
             String payload = queueData.getPayload();
 
-            //Object patientObject = JsonUtils.readAsObject(queueData.getPayload(), "$['patient']");
-            processPatient(encounter, payload);
-
             //Object encounterObject = JsonUtils.readAsObject(queueData.getPayload(), "$['encounter']");
             processEncounter(encounter, payload);
+
+            //Object patientObject = JsonUtils.readAsObject(queueData.getPayload(), "$['patient']");
+            processPatient(encounter, payload);
 
             Object obsObject = JsonUtils.readAsObject(queueData.getPayload(), "$['observation']");
             processObs(encounter, null, obsObject);
@@ -135,19 +125,8 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
 
         try {
             if (validate(queueData)) {
-                Set<Obs> obss =  encounter.getAllObs();
-                boolean allObsValid = true;
-                for(Obs obs:obss){
-                    if(!isValidObs(obs)){
-                        allObsValid = false;
-                        queueProcessorException.addException(new Exception("Unable to process obs for concept with id: " + obs.getConcept().getConceptId()));
-                    }
-
-                }
-
-                if(allObsValid) {
-                    Context.getEncounterService().saveEncounter(encounter);
-                }
+                assignToVisit(encounter);
+                Context.getEncounterService().saveEncounter(encounter);
             }
         } catch (Exception e) {
             if (!e.getClass().equals(QueueProcessorException.class))
@@ -237,7 +216,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param encounter - Encounter
      * @param parentObs - Obs
      * @param obsObject - Object
@@ -249,9 +228,10 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
                 String[] conceptElements = StringUtils.split(conceptQuestion, "\\^");
                 if (conceptElements.length < 3)
                     continue;
-                Concept concept = getConceptByUuidOrId(conceptElements[0]);
+                int conceptId = Integer.parseInt(conceptElements[0]);
+                Concept concept = Context.getConceptService().getConcept(conceptId);
                 if (concept == null) {
-                    queueProcessorException.addException(new Exception("Unable to find Concept for Question with ID: " + conceptElements[0]));
+                    queueProcessorException.addException(new Exception("Unable to find Concept for Question with ID: " + conceptId));
                 } else {
                     if (concept.isSet()) {
                         Obs obsGroup = new Obs();
@@ -281,7 +261,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param encounter - Encounter
      * @param parentObs - Obs
      * @param concept - Concept
@@ -303,18 +283,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
                 Date obsDateTime = parseDate(dateString);
                 obs.setObsDatetime(obsDateTime);
             }
-        }else if(o instanceof JSONObject){
-            JSONObject obj = (JSONObject) o;
-            if(obj.containsKey("obs_value")){
-                value = (String)obj.get("obs_value");
-            }
-            if(obj.containsKey("obs_datetime")){
-                String dateString = (String)obj.get("obs_datetime");
-                Date obsDateTime = parseDate(dateString);
-                obs.setObsDatetime(obsDateTime);
-            }
-        }
-        else{
+        }else{
             value = o.toString();
         }
         // find the obs value :)
@@ -324,23 +293,18 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
                 || concept.getDatatype().isTime()
                 || concept.getDatatype().isDateTime()) {
             obs.setValueDatetime(parseDate(value));
-        } else if (concept.getDatatype().isCoded() || concept.getDatatype().isBoolean() ) {
+        } else if (concept.getDatatype().isCoded() || concept.getDatatype().isBoolean()) {
             String[] valueCodedElements = StringUtils.split(value, "\\^");
-
-            Concept valueCoded = null;
-            if(valueCodedElements.length >= 3){
-                valueCoded = getConceptByUuidOrId(valueCodedElements[0]);
-            }
-
+            int valueCodedId = Integer.parseInt(valueCodedElements[0]);
+            Concept valueCoded = Context.getConceptService().getConcept(valueCodedId);
             if (valueCoded == null) {
-                queueProcessorException.addException(new Exception("Unable to find concept for value coded with identifier: " + valueCodedElements[0]));
+                queueProcessorException.addException(new Exception("Unable to find concept for value coded with id: " + valueCodedId));
             } else {
                 obs.setValueCoded(valueCoded);
             }
         } else if (concept.getDatatype().isText()) {
             obs.setValueText(value);
         }
-
         // only add if the value is not empty :)
         encounter.addObs(obs);
         if (parentObs != null) {
@@ -348,19 +312,8 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
         }
     }
 
-    private Concept getConceptByUuidOrId(String uuidOrId){
-        Concept concept;
-        if (StringUtils.isNumeric(uuidOrId)) {
-            int conceptId = Integer.parseInt(uuidOrId);
-            concept = Context.getConceptService().getConcept(conceptId);
-        } else {
-            concept = Context.getConceptService().getConceptByUuid(uuidOrId);
-        }
-        return concept;
-    }
-
     /**
-     * 
+     *
      * @param encounter - Encounter
      * @param parentObs Obs
      * @param childObsObject - java.lang.Object
@@ -386,7 +339,7 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
     }
 
     /**
-     * 
+     *
      * @param encounter - Encounter
      * @param encounterObject - java.lang.Object
      * @throws QueueProcessorException
@@ -465,106 +418,19 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
         String jsonPayloadTimezone = JsonUtils.readAsString(encounterPayload, "$['encounter']['encounter.device_time_zone']");
         Date encounterDatetime = JsonUtils.readAsDateTime(encounterPayload, "$['encounter']['encounter.encounter_datetime']",dateTimeFormat,jsonPayloadTimezone);
         encounter.setEncounterDatetime(encounterDatetime);
-
-        MuzimaSetting muzimaVisitSetting = getMuzimaSetting(encounterPayload,MUZIMA_VISIT_GENERATION_SETTING_PROPERTY);
-        boolean isVisitGenerationEnabled = false;
-        if(muzimaVisitSetting != null){
-            isVisitGenerationEnabled = muzimaVisitSetting.getValueBoolean();
-        }
-        if(isVisitGenerationEnabled) {
-            VisitService visitService = Context.getService(VisitService.class);
-            List<Visit> patientVisit = visitService.getVisitsByPatient(encounter.getPatient(), true, false);
-            Visit encounterVisit = null;
-            Collections.sort(patientVisit, visitDateTimeComparator);
-            for (Visit visit : patientVisit) {
-                if (visit.getStopDatetime() == null) {
-                    if (encounterDatetime.compareTo(visit.getStartDatetime()) >= 0) {
-                        encounterVisit = visit;
-                        break;
-                    }
-                } else if (encounterDatetime.compareTo(visit.getStartDatetime()) >= 0 && (encounterDatetime.compareTo(visit.getStopDatetime()) <= 0)) {
-                    encounterVisit = visit;
-                    break;
-                }
-            }
-
-            if (encounterVisit == null) {
-                MuzimaSetting defaultMuzimaVisitTypeSetting = getMuzimaSetting(encounterPayload, DEFAULT_MUZIMA_VISIT_TYPE_SETTING_PROPERTY);
-                String defaultMuzimaVisitTypeUuid = "";
-                if (defaultMuzimaVisitTypeSetting != null) {
-                    defaultMuzimaVisitTypeUuid = defaultMuzimaVisitTypeSetting.getValueString();
-                    if (!defaultMuzimaVisitTypeUuid.isEmpty()) {
-                        VisitType visitType = visitService.getVisitTypeByUuid(defaultMuzimaVisitTypeUuid);
-                        if (visitType != null) {
-                            String uuid = UUID.randomUUID().toString();
-                            Calendar encounterDate = Calendar.getInstance();
-                            encounterDate.setTime(encounterDatetime);
-                            Calendar startTime = Calendar.getInstance();
-                            startTime.set(Calendar.YEAR, encounterDate.get(Calendar.YEAR));
-                            startTime.set(Calendar.MONDAY, encounterDate.get(Calendar.MONTH));
-                            startTime.set(Calendar.DATE, encounterDate.get(Calendar.DATE));
-                            startTime.set(Calendar.HOUR_OF_DAY, 0);
-                            startTime.set(Calendar.MINUTE, 0);
-                            startTime.set(Calendar.SECOND, 0);
-
-                            Calendar endTime = Calendar.getInstance();
-                            endTime.set(Calendar.YEAR, encounterDate.get(Calendar.YEAR));
-                            endTime.set(Calendar.MONDAY, encounterDate.get(Calendar.MONTH));
-                            endTime.set(Calendar.DATE, encounterDate.get(Calendar.DATE));
-                            endTime.set(Calendar.HOUR_OF_DAY, 23);
-                            endTime.set(Calendar.MINUTE, 59);
-                            endTime.set(Calendar.SECOND, 59);
-
-                            Visit visit = new Visit();
-                            visit.setPatient(encounter.getPatient());
-                            visit.setVisitType(visitType);
-                            visit.setStartDatetime(startTime.getTime());
-                            visit.setStopDatetime(endTime.getTime());
-                            visit.setCreator(user);
-                            visit.setDateCreated(new Date());
-                            visit.setUuid(uuid);
-                            visitService.saveVisit(visit);
-                            encounterVisit = visitService.getVisitByUuid(uuid);
-                        } else {
-                            queueProcessorException.addException(new Exception("Unable to find default visit type with uuid " + defaultMuzimaVisitTypeUuid));
-                        }
-                    } else {
-                        queueProcessorException.addException(new Exception("Unable to find default visit type. Default visit type setting not set. "));
-                    }
-
-                } else {
-                    queueProcessorException.addException(new Exception("Unable to find default visit type. Default visit type setting not set. "));
-                }
-            }
-
-            encounter.setVisit(encounterVisit);
-        }
     }
 
-    private final Comparator<Visit> visitDateTimeComparator = new Comparator<Visit>() {
-        @Override
-        public int compare(Visit lhs, Visit rhs) {
-            return -lhs.getStartDatetime().compareTo(rhs.getStartDatetime());
-        }
-    };
-
     /**
-     * 
+     *
      * @param dateValue - String representation of the date value.
      * @return java.util.Date Object
      */
     private Date parseDate(final String dateValue) {
         Date date = null;
-        if(StringUtils.isNumeric(dateValue))
-        {
-            long timestamp = Long.parseLong(dateValue);
-            date = new Date(timestamp);
-        }else {
-            try {
-                date = dateFormat.parse(dateValue);
-            } catch (ParseException e) {
-                log.error("Unable to parse date data for encounter!", e);
-            }
+        try {
+            date = dateFormat.parse(dateValue);
+        } catch (ParseException e) {
+            log.error("Unable to parse date data for encounter!", e);
         }
         return date;
     }
@@ -574,34 +440,100 @@ public class JsonEncounterQueueDataHandler implements QueueDataHandler {
         return StringUtils.equals(DISCRIMINATOR_VALUE, queueData.getDiscriminator());
     }
 
-    /**
-     * Checks if all obs have concepts with valid datatype.
-     * @param obs
-     * @return boolean
-     */
-    public boolean isValidObs(Obs obs){
-        return (obs.getConcept().getDatatype().isBoolean() || obs.getConcept().getDatatype().isNumeric() || obs.getConcept().getDatatype().isDate() || obs.getConcept().getDatatype().isTime() || obs.getConcept().getDatatype().isDateTime() || obs.getConcept().getDatatype().isCoded() || obs.getConcept().getDatatype().isText() || (obs.getConcept().isSet() && obs.isObsGrouping()));
+    protected static void useNewVisit(Encounter encounter) {
+        String VISIT_SOURCE_FORM = "8bfab185-6947-4958-b7ab-dfafae1a3e3d";
+        Visit visit = new Visit();
+        visit.setStartDatetime(OpenmrsUtil.firstSecondOfDay(encounter.getEncounterDatetime()));
+        visit.setStopDatetime(OpenmrsUtil.getLastMomentOfDay(encounter.getEncounterDatetime()));
+        visit.setLocation(encounter.getLocation());
+        visit.setPatient(encounter.getPatient());
+        visit.setVisitType(Context.getVisitService().getVisitTypeByUuid("3371a4d4-f66f-4454-a86d-92c7b3da990c"));
+
+        VisitAttribute sourceAttr = new VisitAttribute();
+        sourceAttr.setAttributeType(Context.getVisitService().getVisitAttributeTypeByUuid(VISIT_SOURCE_FORM));
+        sourceAttr.setOwner(visit);
+        sourceAttr.setValue(encounter.getForm());
+        visit.addAttribute(sourceAttr);
+
+        Context.getVisitService().saveVisit(visit);
+
+        setVisitOfEncounter(visit, encounter);
     }
 
-    public MuzimaSetting getMuzimaSetting(String encounterPayload,String setting){
-        MuzimaSettingService settingService = Context.getService(MuzimaSettingService.class);
-        MuzimaSetting defaultMuzimaVisitTypeSetting = null;
-        String activeSetupConfigUuid = JsonUtils.readAsString(encounterPayload, "$['encounter']['encounter.setup_config_uuid']");
-        if(StringUtils.isNotBlank(activeSetupConfigUuid)){
-            MuzimaConfigService configService = Context.getService(MuzimaConfigService.class);
-            MuzimaConfig config = configService.getConfigByUuid(activeSetupConfigUuid);
-            if(config != null){
-                defaultMuzimaVisitTypeSetting = config.getConfigMuzimaSettingByProperty(setting);
-                if(defaultMuzimaVisitTypeSetting == null){
-                    defaultMuzimaVisitTypeSetting = settingService.getMuzimaSettingByProperty(setting);
-                }
-            } else {
-                defaultMuzimaVisitTypeSetting = settingService.getMuzimaSettingByProperty(setting);
-            }
-        }else{
-            defaultMuzimaVisitTypeSetting = settingService.getMuzimaSettingByProperty(setting);
+    protected static void setVisitOfEncounter(Visit visit, Encounter encounter) {
+        // Remove from old visit
+        if (encounter.getVisit() != null) {
+            encounter.getVisit().getEncounters().remove(encounter);
         }
 
-        return defaultMuzimaVisitTypeSetting;
+        // Set to new visit
+        encounter.setVisit(visit);
+
+        if (visit != null) {
+            visit.addEncounter(encounter);
+        }
+    }
+
+    /**
+     * Checks whether a date has any time value
+     * @param date the date
+     * @return true if the date has time
+     * @should return true only if date has time
+     */
+    protected  boolean dateHasTime(Date date) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(date);
+        return cal.get(Calendar.HOUR) != 0 || cal.get(Calendar.MINUTE) != 0 || cal.get(Calendar.SECOND) != 0 || cal.get(Calendar.MILLISECOND) != 0;
+    }
+
+    /**
+     * Uses an existing visit for the given encounter
+     * @param encounter the encounter
+     * @return true if a suitable visit was found
+     */
+    protected boolean useExistingVisit(Encounter encounter) {
+        // If encounter has time, then we need an exact fit for an existing visit
+        List<Visit> visits = Context.getVisitService().getVisits(null, Collections.singletonList(encounter.getPatient()), null, null, null,
+                encounter.getEncounterDatetime(), null, null, null, true, false);
+
+        for (Visit visit : visits) {
+            // Skip visits which ended before the encounter date
+            if (visit.getStopDatetime() != null && visit.getStopDatetime().before(encounter.getEncounterDatetime())) {
+                continue;
+            }
+
+            if (checkLocations(visit, encounter)) {
+                setVisitOfEncounter(visit, encounter);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Convenience method to check whether the location of a visit and an encounter are compatible
+     * @param visit the visit
+     * @param encounter the encounter
+     * @return true if locations won't conflict
+     */
+    protected boolean checkLocations(Visit visit, Encounter encounter) {
+        return visit.getLocation() == null || Location.isInHierarchy(encounter.getLocation(), visit.getLocation());
+    }
+
+    /**
+     * Does the actual assignment of the encounter to a visit
+     * @param encounter the encounter
+     */
+    protected void assignToVisit(Encounter encounter) {
+        // Do nothing if the encounter already belongs to a visit and can't be moved
+        if (encounter.getVisit() != null) {
+            return;
+        }
+
+        // Try using an existing visit
+        if (!useExistingVisit(encounter)) {
+            useNewVisit(encounter);
+
+        }
     }
 }
