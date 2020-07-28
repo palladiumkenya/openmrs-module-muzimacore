@@ -59,6 +59,7 @@ public class QueueDataProcessor {
             log.info("Starting up queue data processor ...");
             DataService dataService = Context.getService(DataService.class);
             List<QueueData> queueDataList = dataService.getAllQueueData();
+            System.out.println("queueDataList=================>"+queueDataList);
             List<QueueDataHandler> queueDataHandlers =
                     HandlerUtil.getHandlersForType(QueueDataHandler.class, QueueData.class);
             for (QueueDataHandler queueDataHandler : queueDataHandlers) {
